@@ -20,6 +20,7 @@
     "express-session": "^1.18.1",
     "fs": "^0.0.1-security",
     "http": "^0.0.1-security",
+    "mongoose": "^8.8.2",
     "nodemon": "^3.1.7",
     "ws": "^8.18.0"
   }
