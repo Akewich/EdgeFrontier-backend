@@ -121,6 +121,7 @@ app.get("/api/data/:id", async (req, res) => {
   }
 });
 
+// Create Data
 app.post("/api/data", async (req, res) => {
   try {
     const data = await dataRead.create(req.body);
