@@ -1,57 +1,107 @@
+//! Danger: This is a simple server for testing purposes only. Do not use in production.
+//* This server is for testing purposes only. Do not use in production.
+//? This server is for testing purposes only. Do not use in production.
+//TODO: This server is for testing purposes only. Do not use in production.
+
 // Required modules
 const express = require("express");
 const app = express();
-require("dotenv").config();
 const port = process.env.PORT || 8000;
 const WebSocket = require("ws");
 const http = require("http");
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ noServer: true });
+const wss2 = new WebSocket.Server({ noServer: true });
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const mongoose = require("mongoose");
-const dataRead = require("./models/data");
+const mongodb = require("mongodb");
+
+// Load environment variables
+require("dotenv").config();
 
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
 
-// Connection to Database
-mongoose
-  .connect(process.env.DB_URI)
+//TODO---------------------------------------MongoDB-----------------------------------------
+// connect to MongoDB
+// const uri = process.env.MONGO_URI; // Ensure this is correctly loaded
+const client = new mongodb.MongoClient(process.env.MONGO_URI);
+let db;
+
+// async function connectToDatabase() {
+//   try {
+//     await client.connect();
+//     console.log("Connected to MongoDB successfully!");
+//   } catch (err) {
+//     console.error("Error connecting to MongoDB:", err.message);
+//   }
+// }
+// connectToDatabase();
+client
+  .connect()
   .then(() => {
-    console.log("Connected to MongoDB Database!");
+    db = client.db("frontier");
+    console.log("Connected to MongoDB");
   })
   .catch((err) => {
-    console.log("Failed to connected to MongoDB", err.message);
+    console.error("MongoDB connection error:", err.message);
   });
+//--------------------------------------------------------------------------------------------
 
 // WebSocket connection
 wss.on("connection", (ws) => {
-  console.log("Client connected");
+  console.log("Client connected to /");
   ws.send("Welcome to the server");
 
   // Handle incoming messages
   ws.on("message", async (data) => {
     try {
       const buffer = Buffer.from(data);
-      const obj = JSON.parse(buffer.toString());
+      const objArray = JSON.parse(buffer.toString());
 
       // Log received data
-      console.log("Received data:", obj);
+      console.log("Received data:", objArray);
 
-      // Respond to client
-      ws.send(
-        `Message received and processed, Date: ${new Date().toISOString()}`
-      );
-
-      // boradcast to all clients
+      //*------------------------------------------------------------------------------------------
+      // send data to all client
       wss.clients.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(obj));
+          client.send(JSON.stringify(objArray));
         }
       });
+      //*------------------------------------------------------------------------------------------
+
+      //TODO---------------------------------------MongoDB-----------------------------------------
+      // Store data in MongoDB
+
+      // Ensure `objArray` is an array
+      const documents = Array.isArray(objArray) ? objArray : [objArray];
+      // MongoDB collection
+      const collection = db.collection("data_Log");
+
+      // Insert data into the collection
+      const result = await collection.insertMany(documents);
+      console.log("Data stored in MongoDB:", result.insertedCount);
+
+      // Check the total number of documents in the collection
+      const count = await collection.countDocuments();
+      console.log("Total number of documents:", count);
+      if (count > 100) {
+        //     // Delete the oldest documents to keep the total count at 100
+        const excessCount = count - 100;
+        const oldestDocs = await collection
+          .find()
+          .sort({ _id: 1 })
+          .limit(excessCount)
+          .toArray();
+        const oldestIds = oldestDocs.map((doc) => doc._id);
+        await collection.deleteMany({ _id: { $in: oldestIds } });
+        console.log(
+          `Deleted ${excessCount} oldest documents to maintain a maximum of 100 documents.`
+        );
+      }
+      //TODO---------------------------------------MongoDB-----------------------------------------
     } catch (err) {
       console.error("Error processing message:", err.message);
       ws.send("Error processing data");
@@ -65,84 +115,130 @@ wss.on("connection", (ws) => {
 
   // Handle client disconnection
   ws.on("close", () => {
-    console.log("Client disconnected");
+    console.log("Client disconnected from /");
   });
 });
+
+//--------------------------------------------------------------------------------------------
+
+//* ws://localhost:8000/demo endpoint
+//* WebSocket connection
+wss2.on("connection", (ws, req) => {
+  const url = req.url; // Extract the URL of the WebSocket request
+
+  if (url === "/demo") {
+    console.log("Client connected to /demo");
+    //  random template data :
+    //  "TimeStamp": "",
+    //  "Event": "random event",
+    //  "Data": {
+    //              "CO2": random number,
+    //              "VOC": random number,
+    //              "RA": random number,
+    //              "TEMP": random number,
+    //              "HUMID": random number,
+    //              "PRESSURE": random number
+    //          }
+
+    // console.log('Sending data:', data);
+    // loop to send data every 1 seconds
+    setInterval(() => {
+      const time = new Date();
+      const data = {
+        TimeStamp: time, // time stamp
+        Event: "random event",
+        Data: {
+          CO2: Math.floor(Math.random() * 100.0),
+          VOC: Math.floor(Math.random() * 100.0),
+          RA: Math.floor(Math.random() * 100.0),
+          TEMP: Math.floor(Math.random() * 100.0),
+          HUMID: Math.floor(Math.random() * 100.0),
+          PRESSURE: Math.floor(Math.random() * 100.0),
+        },
+      };
+      wss2.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify(data));
+          console.log("Sending data from wss2:", data);
+        }
+      });
+    }, 1000);
+
+    // Handle errors
+    ws.on("error", (err) => {
+      console.error("WebSocket error on /demo:", err.message);
+    });
+
+    // Handle client disconnection
+    ws.on("close", () => {
+      console.log("Client disconnected from /demo");
+    });
+  } else {
+    // Handle default connection or other paths
+    console.log("Client connected to default WebSocket");
+    ws.send("Welcome to the default WebSocket endpoint");
+
+    ws.on("message", (message) => {
+      console.log("Received message on default.");
+
+      // Handle or broadcast the message
+      ws.send(`Default handler received: ${message}`);
+    });
+
+    ws.on("error", (err) => {
+      console.error("WebSocket error on default:", err.message);
+    });
+
+    ws.on("close", () => {
+      console.log("Client disconnected from default");
+    });
+  }
+});
+
+//--------------------------------------------------------------------------------------------
 
 // Health check endpoint
 app.get("/", (req, res) => {
   res.send("Server is running");
 });
 
-app.post("/", (req, res) => {
-  const { username, password } = req.body;
-  console.log("username:", username);
-  console.log("password:", password);
-  res.send("Post request received");
-});
+app.post("/api/data", (req, res) => {
+  // Extract data from the request body
+  const data = req.body;
+  // Log the entire request body to debug the issue
+  console.log("Received request body:", JSON.stringify(data));
 
-// Get all data
-app.get("/api/data", async (req, res) => {
-  try {
-    const data = await dataRead.find();
-    console.log("Data", data);
-    res.status(200).json(data);
-
-    // Stream data to all clients
-    wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(data));
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ message: "Error to fetching data" });
-  }
-});
-
-// Get specific data by ID
-app.get("/api/data/:id", async (req, res) => {
-  try {
-    const { id } = req.params; // request data form parameter
-    const data = await dataRead.findById({ dataRead: id }); // find data by Id
-    if (data.length === 0) {
-      return res.status(404).json({ message: "Data not found!" });
+  // Stream data to all clients
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(data));
     }
+  });
 
-    // Broadcast to WebSocket clients
-    wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(data));
-      }
+  res.send("Data sent to all clients");
+});
+
+// Upgrade the HTTP server to a WebSocket server
+server.on("upgrade", (req, socket, head) => {
+  const pathname = req.url
+    ? new URL(req.url, `http://${req.headers.host}`).pathname
+    : "";
+
+  if (pathname === "/") {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
     });
-
-    res.status(200).json(data);
-  } catch (err) {
-    res.status(500).json({ message: "Error to fetching data" });
+  } else if (pathname === "/demo") {
+    wss2.handleUpgrade(req, socket, head, (ws) => {
+      wss2.emit("connection", ws, req);
+    });
+  } else {
+    socket.destroy();
   }
 });
 
-// Create Data
-app.post("/api/data", async (req, res) => {
-  try {
-    const data = await dataRead.create(req.body);
-    console.log("Created data:", data);
-
-    // Respond to client
-    res.status(201).json({ message: "Data logged successfully!", data });
-
-    // Broadcast to WebSocket clients
-    wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(data));
-      }
-    });
-  } catch (error) {
-    console.error("Error creating data:", error.message);
-    res.status(500).json({ message: "Error creating data" });
-  }
-});
-
+//--------------------------------------------------------------------------------------------
 // Server listening
 server.listen(port, () => {
-  console.log(`Server is running on port http://localhost:${port} Naja jubjub`);
+  console.log(`Server is running on port http://localhost:${port}`);
 });
