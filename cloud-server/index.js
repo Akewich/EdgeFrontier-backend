@@ -47,7 +47,12 @@ client
   .catch((err) => {
     console.error("MongoDB connection error:", err.message);
   });
-//--------------------------------------------------------------------------------------------
+//TODO--------------------------------------------------------------------------------------------
+
+//TODO--------------- Switching Modes -------------------------
+// Default Mode
+let currentMode = "Safe mode";
+//TODO---------------------------------------------------------
 
 // WebSocket connection
 wss.on("connection", (ws) => {
@@ -59,53 +64,89 @@ wss.on("connection", (ws) => {
     try {
       const buffer = Buffer.from(data);
       const objArray = JSON.parse(buffer.toString());
-
-      // Log received data
-      console.log("Received data:", objArray);
-
-      //*------------------------------------------------------------------------------------------
-      // send data to all client
-      wss.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(objArray));
+      // Check if required fields are present
+      if (objArray.Mode && objArray.Data && objArray.TimeStamp) {
+        console.log("Valid data received:", objArray);
+        // Process data according to mode
+        if (objArray.Mode === "Safe mode") {
+          await handleSafeMode(objArray, ws);
+        } else if (objArray.Mode === "Prediction mode") {
+          await handlePredictionMode(objArray, ws);
+        } else {
+          ws.send("Invalid mode. Please use 'Safe mode' or 'Prediction mode'.");
         }
-      });
-      //*------------------------------------------------------------------------------------------
-
-      //TODO---------------------------------------MongoDB-----------------------------------------
-      // Store data in MongoDB
-
-      // Ensure `objArray` is an array
-      const documents = Array.isArray(objArray) ? objArray : [objArray];
-      // MongoDB collection
-      const collection = db.collection("data_Log");
-
-      // Insert data into the collection
-      const result = await collection.insertMany(documents);
-      console.log("Data stored in MongoDB:", result.insertedCount);
-
-      // Check the total number of documents in the collection
-      const count = await collection.countDocuments();
-      console.log("Total number of documents:", count);
-      if (count > 100) {
-        //     // Delete the oldest documents to keep the total count at 100
-        const excessCount = count - 100;
-        const oldestDocs = await collection
-          .find()
-          .sort({ _id: 1 })
-          .limit(excessCount)
-          .toArray();
-        const oldestIds = oldestDocs.map((doc) => doc._id);
-        await collection.deleteMany({ _id: { $in: oldestIds } });
-        console.log(
-          `Deleted ${excessCount} oldest documents to maintain a maximum of 100 documents.`
-        );
+      } else {
+        ws.send("Invalid data structure. Missing required fields.");
       }
-      //TODO---------------------------------------MongoDB-----------------------------------------
+
+      // if (objArray.command && objArray.command.startsWith("Mode")) {
+      //   // const mode = objArray.command.split(":")[1];
+      //   if (mode === "Safe mode" || mode === "Prediction mode") {
+      //     currentMode = mode;
+      //     console.log(`Mode switched to: ${currentMode}`);
+      //     ws.send(`Mode switched to: ${currentMode}`);
+      //   } else {
+      //     ws.send(
+      //       "Invalid mode. Use 'Mode:Safe mode' or 'Mode:Prediction mode'"
+      //     );
+      //   }
+      //   return;
+      // }
+      // if (currentMode === "Safe mode") {
+      //   await handleSafeMode(message, ws);
+      // } else if (currentMode === "Prediction mode") {
+      //   await handlePredictionMode(message, ws);
+      // }
     } catch (err) {
       console.error("Error processing message:", err.message);
       ws.send("Error processing data");
     }
+    // // Log received data
+    // console.log("Received data:", objArray);
+
+    // //*------------------------------------------------------------------------------------------
+    // // send data to all client
+    // wss.clients.forEach((client) => {
+    //   if (client.readyState === WebSocket.OPEN) {
+    //     client.send(JSON.stringify(objArray));
+    //   }
+    // });
+    //*------------------------------------------------------------------------------------------
+
+    //   //TODO---------------------------------------MongoDB-----------------------------------------
+    //   // Store data in MongoDB
+
+    //   // Ensure `objArray` is an array
+    //   const documents = Array.isArray(objArray) ? objArray : [objArray];
+    //   // MongoDB collection
+    //   const collection = db.collection("data_Log");
+
+    //   // Insert data into the collection
+    //   const result = await collection.insertMany(documents);
+    //   console.log("Data stored in MongoDB:", result.insertedCount);
+
+    //   // Check the total number of documents in the collection
+    //   const count = await collection.countDocuments();
+    //   console.log("Total number of documents:", count);
+    //   if (count > 100) {
+    //     //     // Delete the oldest documents to keep the total count at 100
+    //     const excessCount = count - 100;
+    //     const oldestDocs = await collection
+    //       .find()
+    //       .sort({ _id: 1 })
+    //       .limit(excessCount)
+    //       .toArray();
+    //     const oldestIds = oldestDocs.map((doc) => doc._id);
+    //     await collection.deleteMany({ _id: { $in: oldestIds } });
+    //     console.log(
+    //       `Deleted ${excessCount} oldest documents to maintain a maximum of 100 documents.`
+    //     );
+    //   }
+    //   //TODO---------------------------------------MongoDB-----------------------------------------
+    // } catch (err) {
+    //   console.error("Error processing message:", err.message);
+    //   ws.send("Error processing data");
+    // }
   });
 
   // Handle errors
@@ -118,6 +159,73 @@ wss.on("connection", (ws) => {
     console.log("Client disconnected from /");
   });
 });
+
+//* Safe Mode Handler
+async function handleSafeMode(message, ws) {
+  console.log("Safe mode: Processing data...");
+  const safeCollection = db.collection("safe_mode_Log");
+  // Process data minimally and store it
+  const time = new Date();
+  const safeData = {
+    TimeStamp: time, // time stamp
+    Data: {
+      CO2: Math.floor(Math.random() * 100.0),
+      VOC: Math.floor(Math.random() * 100.0),
+      RA: Math.floor(Math.random() * 100.0),
+      TEMP: Math.floor(Math.random() * 100.0),
+      HUMID: Math.floor(Math.random() * 100.0),
+      PRESSURE: Math.floor(Math.random() * 100.0),
+    },
+  };
+  const documents = Array.isArray(safeData) ? safeData : [safeData];
+
+  // const result = await safeCollection.insertMany(safeData);
+  // console.log("Data stored in Safe Mode collection:", result.insertedId);
+
+  // Broadcast sanitized data to all clients
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ Mode: "Safe mode", data: documents }));
+    }
+  });
+  const result = await safeCollection.insertMany(documents);
+  console.log("Data stored in MongoDB:", result.insertedCount);
+  console.log("Sent data in Safe Mode:", documents);
+}
+
+//*----------------
+async function handlePredictionMode(message, ws) {
+  console.log("Prediction mode: Processing data...");
+  const predicCollection = db.collection("predic_mode_Log");
+  // Simulated data with an event
+  const time = new Date();
+  const predictedData = {
+    TimeStamp: time,
+    Event: "", // Simulated event
+    Data: {
+      CO2: Math.floor(Math.random() * 100.0),
+      VOC: Math.floor(Math.random() * 100.0),
+      RA: Math.floor(Math.random() * 100.0),
+      TEMP: Math.floor(Math.random() * 100.0),
+      HUMID: Math.floor(Math.random() * 100.0),
+      PRESSURE: Math.floor(Math.random() * 100.0),
+    },
+  };
+  const documents = Array.isArray(predictedData)
+    ? predictedData
+    : [predictedData];
+
+  // Broadcast the data with the event to all clients
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ Mode: "Prediction mode", data: documents }));
+    }
+  });
+  const result = await predicCollection.insertMany(documents);
+  console.log("Data stored in MongoDB:", result.insertedCount);
+
+  console.log("Sent data in Prediction Mode:", documents);
+}
 
 //--------------------------------------------------------------------------------------------
 
@@ -142,11 +250,11 @@ wss2.on("connection", (ws, req) => {
 
     // console.log('Sending data:', data);
     // loop to send data every 1 seconds
+    // Periodic data broadcasting
     setInterval(() => {
       const time = new Date();
-      const data = {
-        TimeStamp: time, // time stamp
-        Event: "random event",
+      const baseData = {
+        TimeStamp: time, // Time stamp
         Data: {
           CO2: Math.floor(Math.random() * 100.0),
           VOC: Math.floor(Math.random() * 100.0),
@@ -156,12 +264,19 @@ wss2.on("connection", (ws, req) => {
           PRESSURE: Math.floor(Math.random() * 100.0),
         },
       };
+
+      // Add the `Event` field only in Prediction Mode
+      if (currentMode === "Prediction mode") {
+        baseData.Event = ""; // Example event, replace with real logic
+      }
+
+      // Broadcast data to all clients
       wss2.clients.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(data));
-          console.log("Sending data from wss2:", data);
+          client.send(JSON.stringify(baseData));
         }
       });
+      console.log(`Data ${currentMode}:`, baseData);
     }, 1000);
 
     // Handle errors
@@ -191,6 +306,7 @@ wss2.on("connection", (ws, req) => {
 
     ws.on("close", () => {
       console.log("Client disconnected from default");
+      clearInterval(intervalId);
     });
   }
 });
