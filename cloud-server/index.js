@@ -246,6 +246,7 @@ server.on("upgrade", (req, socket, head) => {
 app.post("/hardware", mode.checkmode);
 app.post("/command", mode.changeMode);
 app.get("/register", mode.registerDevice);
+app.get("/list", mode.listHardware);
 
 //TODO----------------------------------------------------------------------------------------
 

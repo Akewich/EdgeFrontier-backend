@@ -185,4 +185,27 @@ const changeMode = async (req, res) => {
   }
 };
 
-module.exports = { checkmode, registerDevice, changeMode };
+const listHardware = async (req, res) => {
+  try {
+    // Connect to MongoDB
+    await client.connect();
+    const db = client.db("frontier");
+    const collection = db.collection("sessions_log");
+
+    // Find all devices
+    const devices = await collection
+      .find({}, { projection: { _id: 0 } })
+      .toArray();
+    if (!devices) {
+      console.log("No devices found");
+      return res.status(404).send("No devices found");
+    }
+
+    return res.status(200).send(devices);
+  } catch (error) {
+    console.log(error);
+    res.status(500).send("Internal Server Error");
+  }
+};
+
+module.exports = { checkmode, registerDevice, changeMode, listHardware };
