@@ -16,6 +16,9 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 const mongodb = require("mongodb");
 
+//? another file
+const mode = require("./control.js");
+
 // Load environment variables
 require("dotenv").config();
 
@@ -23,23 +26,11 @@ require("dotenv").config();
 app.use(cors());
 app.use(bodyParser.json());
 
-const command = require("./controll");
-
 //TODO---------------------------------------MongoDB-----------------------------------------
 // connect to MongoDB
-// const uri = process.env.MONGO_URI; // Ensure this is correctly loaded
 const client = new mongodb.MongoClient(process.env.MONGO_URI);
 let db;
 
-// async function connectToDatabase() {
-//   try {
-//     await client.connect();
-//     console.log("Connected to MongoDB successfully!");
-//   } catch (err) {
-//     console.error("Error connecting to MongoDB:", err.message);
-//   }
-// }
-// connectToDatabase();
 client
   .connect()
   .then(() => {
@@ -49,218 +40,66 @@ client
   .catch((err) => {
     console.error("MongoDB connection error:", err.message);
   });
-//TODO--------------------------------------------------------------------------------------------
-
-//TODO--------------- Switching Modes -------------------------
-// Default Mode
-let currentMode = "SAFE";
-//TODO---------------------------------------------------------
-
-const clients = new Map();
+//--------------------------------------------------------------------------------------------
 
 // WebSocket connection
 wss.on("connection", (ws) => {
   console.log("Client connected to /");
   ws.send("Welcome to the server");
 
-  ws.on("message", async (message) => {
+  // Handle incoming messages
+  ws.on("message", async (data) => {
     try {
-      const data = JSON.parse(message); // Parse the incoming message
-      const { HardwareID, Mode, SPEED, Data, Event, TimeStamp } = data;
+      const buffer = Buffer.from(data);
+      const objArray = JSON.parse(buffer.toString());
 
-      if (!HardwareID || !Mode) {
-        ws.send(
-          JSON.stringify({
-            type: "Error",
-            message: "Invalid payload: Missing HardwareID or Mode",
-          })
-        );
-        return;
-      }
+      // Log received data
+      console.log("Received data:", objArray);
 
-      // MongoDB Collections
-      const safeModeCollection = db.collection("safeModeData");
-      const predictionModeCollection = db.collection("predictionModeData");
-
-      if (Mode === "Safe mode") {
-        // Safe mode handling
-        const safeModeData = {
-          HardwareID,
-          Mode,
-          SPEED,
-          Data: {
-            CO2: Math.floor(Math.random() * 100.0),
-            HUMID: Math.floor(Math.random() * 100.0),
-            PRESSURE: Math.floor(Math.random() * 100.0),
-            RA: Math.floor(Math.random() * 100.0),
-            TEMP: Math.floor(Math.random() * 100.0),
-            VOC: Math.floor(Math.random() * 100.0),
-          },
-          Event,
-          TimeStamp: TimeStamp || new Date().toISOString(),
-        };
-
-        await safeModeCollection.insertOne(safeModeData);
-
-        // Broadcast Safe mode data to all clients
-        broadcast({
-          type: "SafeModeData",
-          record: safeModeData,
-        });
-        ws.send(
-          JSON.stringify({
-            type: "Success",
-            message: "Safe mode data created",
-            data: safeModeData,
-          })
-        );
-      } else if (Mode === "PREDICTION") {
-        // Transition to Prediction mode
-        const existingSafeModeRecord = await safeModeCollection.findOne({
-          HardwareID,
-        });
-
-        if (!existingSafeModeRecord) {
-          ws.send(
-            JSON.stringify({
-              type: "Error",
-              message: "HardwareID not found in Safe mode",
-            })
-          );
-          return;
+      //*------------------------------------------------------------------------------------------
+      // send data to all client
+      wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify(objArray));
         }
+      });
+      //*------------------------------------------------------------------------------------------
 
-        const predictionData = {
-          ...existingSafeModeRecord,
-          Mode: "Prediction mode",
-          SPEED,
-          Prediction: {
-            Cold: 0.0,
-            Dry: 0.0,
-            Hot: 0.0,
-          },
-        };
+      // //TODO---------------------------------------MongoDB-----------------------------------------
+      // Store data in MongoDB
+      // MongoDB collection
+      // Ensure `objArray` is an array
+      const documents = Array.isArray(objArray) ? objArray : [objArray];
+      // MongoDB collection
+      const collection = db.collection("data_log");
 
-        await predictionModeCollection.insertOne(predictionData);
-        await safeModeCollection.deleteOne({ HardwareID });
+      // Insert data into the collection
+      const result = await collection.insertMany(documents);
+      console.log("Data stored in MongoDB:", result.insertedCount);
 
-        // Broadcast Prediction mode data to all clients
-        broadcast({
-          type: "PredictionModeData",
-          record: predictionData,
-        });
-        ws.send(
-          JSON.stringify({
-            type: "Success",
-            message: "Mode switched to Prediction mode",
-            data: predictionData,
-          })
-        );
-      } else {
-        ws.send(
-          JSON.stringify({
-            type: "Error",
-            message: "Invalid mode or unrecognized command",
-          })
+      // Check the total number of documents in the collection
+      const count = await collection.countDocuments();
+      console.log("Total number of documents:", count);
+      if (count > 100) {
+        // Delete the oldest documents to keep the total count at 100
+        const excessCount = count - 100;
+        const oldestDocs = await collection
+          .find()
+          .sort({ _id: 1 })
+          .limit(excessCount)
+          .toArray();
+        const oldestIds = oldestDocs.map((doc) => doc._id);
+        await collection.deleteMany({ _id: { $in: oldestIds } });
+        console.log(
+          `Deleted ${excessCount} oldest documents to maintain a maximum of 100 documents.`
         );
       }
-    } catch (error) {
-      console.error("Error handling WebSocket message:", error);
-      ws.send(
-        JSON.stringify({ type: "Error", message: "Internal server error" })
-      );
+      //TODO---------------------------------------MongoDB-----------------------------------------
+    } catch (err) {
+      console.error("Error processing message:", err.message);
+      ws.send("Error processing data");
     }
   });
-
-  // Handle incoming messages
-  // ws.on("message", async (data) => {
-  // try {
-  //   const buffer = Buffer.from(data);
-  //   const objArray = JSON.parse(buffer.toString());
-  //   // Check if required fields are present
-  //   if (objArray.Mode && objArray.Data && objArray.TimeStamp) {
-  //     console.log("Valid data received:", objArray);
-  //     // Process data according to mode
-  //     if (objArray.Mode === "SAFE") {
-  //       await handleSafeMode(objArray, ws);
-  //     } else if (objArray.Mode === "PREDICTION") {
-  //       await handlePredictionMode(objArray, ws);
-  //     } else {
-  //       ws.send("Invalid mode. Please use 'Safe mode' or 'Prediction mode'.");
-  //     }
-  //   } else {
-  //     ws.send("Invalid data structure. Missing required fields.");
-  //   }
-
-  // if (objArray.command && objArray.command.startsWith("Mode")) {
-  //   // const mode = objArray.command.split(":")[1];
-  //   if (mode === "Safe mode" || mode === "Prediction mode") {
-  //     currentMode = mode;
-  //     console.log(`Mode switched to: ${currentMode}`);
-  //     ws.send(`Mode switched to: ${currentMode}`);
-  //   } else {
-  //     ws.send(
-  //       "Invalid mode. Use 'Mode:Safe mode' or 'Mode:Prediction mode'"
-  //     );
-  //   }
-  //   return;
-  // }
-  // if (currentMode === "Safe mode") {
-  //   await handleSafeMode(message, ws);
-  // } else if (currentMode === "Prediction mode") {
-  //   await handlePredictionMode(message, ws);
-  // }
-  // } catch (err) {
-  //   console.error("Error processing message:", err.message);
-  //   ws.send("Error processing data");
-  // }
-  // // Log received data
-  // console.log("Received data:", objArray);
-
-  // //*------------------------------------------------------------------------------------------
-  // // send data to all client
-  // wss.clients.forEach((client) => {
-  //   if (client.readyState === WebSocket.OPEN) {
-  //     client.send(JSON.stringify(objArray));
-  //   }
-  // });
-  //*------------------------------------------------------------------------------------------
-
-  //   //TODO---------------------------------------MongoDB-----------------------------------------
-  //   // Store data in MongoDB
-
-  //   // Ensure `objArray` is an array
-  //   const documents = Array.isArray(objArray) ? objArray : [objArray];
-  //   // MongoDB collection
-  //   const collection = db.collection("data_Log");
-
-  //   // Insert data into the collection
-  //   const result = await collection.insertMany(documents);
-  //   console.log("Data stored in MongoDB:", result.insertedCount);
-
-  //   // Check the total number of documents in the collection
-  //   const count = await collection.countDocuments();
-  //   console.log("Total number of documents:", count);
-  //   if (count > 100) {
-  //     //     // Delete the oldest documents to keep the total count at 100
-  //     const excessCount = count - 100;
-  //     const oldestDocs = await collection
-  //       .find()
-  //       .sort({ _id: 1 })
-  //       .limit(excessCount)
-  //       .toArray();
-  //     const oldestIds = oldestDocs.map((doc) => doc._id);
-  //     await collection.deleteMany({ _id: { $in: oldestIds } });
-  //     console.log(
-  //       `Deleted ${excessCount} oldest documents to maintain a maximum of 100 documents.`
-  //     );
-  //   }
-  //   //TODO---------------------------------------MongoDB-----------------------------------------
-  // } catch (err) {
-  //   console.error("Error processing message:", err.message);
-  //   ws.send("Error processing data");
-  // }
-  // });
 
   // Handle errors
   ws.on("error", (err) => {
@@ -273,13 +112,7 @@ wss.on("connection", (ws) => {
   });
 });
 
-const broadcast = (message) => {
-  clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(message));
-    }
-  });
-};
+//--------------------------------------------------------------------------------------------
 
 //* ws://localhost:8000/demo endpoint
 //* WebSocket connection
@@ -302,12 +135,11 @@ wss2.on("connection", (ws, req) => {
 
     // console.log('Sending data:', data);
     // loop to send data every 1 seconds
-    // Periodic data broadcasting
     setInterval(() => {
       const time = new Date();
-      const baseData = {
+      const data = {
+        TimeStamp: time, // time stamp
         Event: "random event",
-        TimeStamp: time, // Time stamp
         Data: {
           CO2: Math.floor(Math.random() * 100.0),
           VOC: Math.floor(Math.random() * 100.0),
@@ -316,20 +148,21 @@ wss2.on("connection", (ws, req) => {
           HUMID: Math.floor(Math.random() * 100.0),
           PRESSURE: Math.floor(Math.random() * 100.0),
         },
+        Prediction: {
+          CO2: Math.floor(Math.random() * 100.0),
+          VOC: Math.floor(Math.random() * 100.0),
+          RA: Math.floor(Math.random() * 100.0),
+          TEMP: Math.floor(Math.random() * 100.0),
+          HUMID: Math.floor(Math.random() * 100.0),
+          PRESSURE: Math.floor(Math.random() * 100.0),
+        },
       };
-
-      // Add the `Event` field only in Prediction Mode
-      if (currentMode === "Prediction mode") {
-        baseData.Event = "random event"; // Example event, replace with real logic
-      }
-
-      // Broadcast data to all clients
       wss2.clients.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
-          client.send(JSON.stringify(baseData));
+          client.send(JSON.stringify(data));
+          console.log("Sending data from wss2.");
         }
       });
-      console.log(`Data ${currentMode}:`, baseData);
     }, 1000);
 
     // Handle errors
@@ -359,7 +192,6 @@ wss2.on("connection", (ws, req) => {
 
     ws.on("close", () => {
       console.log("Client disconnected from default");
-      clearInterval(intervalId);
     });
   }
 });
@@ -406,11 +238,17 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-app.post("/check", command.checkMode);
-app.post("/register", command.registerDevice);
-app.post("/change", command.changeMode);
-
 //--------------------------------------------------------------------------------------------
+
+//TODO----------------------------------------------------------------------------------------
+
+//TODO 1. Add a new endpoint to change modes
+app.post("/hardware", mode.checkmode);
+app.post("/command", mode.changeMode);
+app.get("/register", mode.registerDevice);
+
+//TODO----------------------------------------------------------------------------------------
+
 // Server listening
 server.listen(port, () => {
   console.log(`Server is running on port http://localhost:${port}`);
