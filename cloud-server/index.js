@@ -23,6 +23,8 @@ require("dotenv").config();
 app.use(cors());
 app.use(bodyParser.json());
 
+const command = require("./controll");
+
 //TODO---------------------------------------MongoDB-----------------------------------------
 // connect to MongoDB
 // const uri = process.env.MONGO_URI; // Ensure this is correctly loaded
@@ -279,86 +281,6 @@ const broadcast = (message) => {
   });
 };
 
-app.post("/command", async (req, res) => {
-  const { HardwareID, Mode, SPEED, Data, Event, TimeStamp } = req.body;
-
-  try {
-    const safeModeCollection = db.collection("safeModeData");
-    const predictionModeCollection = db.collection("predictionModeData");
-
-    if (Mode === "Safe mode") {
-      // Safe mode handling
-      const safeModeData = {
-        HardwareID,
-        Mode,
-        SPEED,
-        Data: {
-          CO2: Math.floor(Math.random() * 100.0),
-          HUMID: Math.floor(Math.random() * 100.0),
-          PRESSURE: Math.floor(Math.random() * 100.0),
-          RA: Math.floor(Math.random() * 100.0),
-          TEMP: Math.floor(Math.random() * 100.0),
-          VOC: Math.floor(Math.random() * 100.0),
-        },
-        Event,
-        TimeStamp: TimeStamp || new Date().toISOString(),
-      };
-
-      await safeModeCollection.insertOne(safeModeData);
-
-      broadcast({
-        type: "SafeModeData",
-        record: safeModeData,
-      });
-
-      return res
-        .status(201)
-        .send({ message: "Safe mode data created", data: safeModeData });
-    } else if (Mode === "PREDICTION") {
-      // Transition to Prediction mode
-      const existingSafeModeRecord = await safeModeCollection.findOne({
-        HardwareID,
-      });
-
-      if (!existingSafeModeRecord) {
-        return res
-          .status(404)
-          .send({ message: "HardwareID not found in Safe mode" });
-      }
-
-      const predictionData = {
-        ...existingSafeModeRecord,
-        Mode: "Prediction mode",
-        SPEED,
-        Prediction: {
-          Cold: 0.0,
-          Dry: 0.0,
-          Hot: 0.0,
-        },
-      };
-
-      await predictionModeCollection.insertOne(predictionData);
-      await safeModeCollection.deleteOne({ HardwareID });
-
-      broadcast({
-        type: "PredictionModeData",
-        record: predictionData,
-      });
-
-      return res.status(200).send({
-        message: "Mode switched to Prediction mode",
-        data: predictionData,
-      });
-    }
-
-    // Invalid mode
-    return res.status(400).send({ message: "Invalid mode or data" });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).send({ message: "Internal server error" });
-  }
-});
-
 //* ws://localhost:8000/demo endpoint
 //* WebSocket connection
 wss2.on("connection", (ws, req) => {
@@ -483,6 +405,10 @@ server.on("upgrade", (req, socket, head) => {
     socket.destroy();
   }
 });
+
+app.post("/check", command.checkMode);
+app.post("/register", command.registerDevice);
+app.post("/change", command.changeMode);
 
 //--------------------------------------------------------------------------------------------
 // Server listening
