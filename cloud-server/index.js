@@ -35,16 +35,16 @@ client
   .connect()
   .then(() => {
     db = client.db("frontier");
-    console.log("Connected to MongoDB");
+    console.log("[MONGO]: Connection successful");
   })
   .catch((err) => {
-    console.error("MongoDB connection error:", err.message);
+    console.error("[MONGO]: Connection error:", err.message);
   });
 //--------------------------------------------------------------------------------------------
 
 // WebSocket connection
 wss.on("connection", (ws) => {
-  console.log("Client connected to /");
+  // console.log('Client connected to /');
   ws.send("Welcome to the server");
 
   // Handle incoming messages
@@ -54,20 +54,15 @@ wss.on("connection", (ws) => {
       const objArray = JSON.parse(buffer.toString());
 
       // Log received data
-      console.log("Received data:", objArray);
+      // console.log('Received data:', objArray);
 
-      //*------------------------------------------------------------------------------------------
-      // send data to all client
+      // Send data to all clients
       wss.clients.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
           client.send(JSON.stringify(objArray));
         }
       });
-      //*------------------------------------------------------------------------------------------
 
-      // //TODO---------------------------------------MongoDB-----------------------------------------
-      // Store data in MongoDB
-      // MongoDB collection
       // Ensure `objArray` is an array
       const documents = Array.isArray(objArray) ? objArray : [objArray];
       // MongoDB collection
@@ -75,26 +70,18 @@ wss.on("connection", (ws) => {
 
       // Insert data into the collection
       const result = await collection.insertMany(documents);
-      console.log("Data stored in MongoDB:", result.insertedCount);
+      // console.log("Data stored in MongoDB:", result.insertedCount);
 
       // Check the total number of documents in the collection
       const count = await collection.countDocuments();
-      console.log("Total number of documents:", count);
-      if (count > 100) {
-        // Delete the oldest documents to keep the total count at 100
-        const excessCount = count - 100;
-        const oldestDocs = await collection
-          .find()
-          .sort({ _id: 1 })
-          .limit(excessCount)
-          .toArray();
-        const oldestIds = oldestDocs.map((doc) => doc._id);
-        await collection.deleteMany({ _id: { $in: oldestIds } });
-        console.log(
-          `Deleted ${excessCount} oldest documents to maintain a maximum of 100 documents.`
-        );
-      }
-      //TODO---------------------------------------MongoDB-----------------------------------------
+      // console.log("Total number of documents:", count);
+
+      // Delete data if data is over 3 minutes old
+      const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000);
+      const deleteResult = await collection.deleteMany({
+        Timestamp: { $lt: threeMinutesAgo },
+      });
+      //console.log(`Deleted ${deleteResult.deletedCount} documents older than 3 minutes`);
     } catch (err) {
       console.error("Error processing message:", err.message);
       ws.send("Error processing data");
@@ -103,12 +90,12 @@ wss.on("connection", (ws) => {
 
   // Handle errors
   ws.on("error", (err) => {
-    console.error("WebSocket error:", err.message);
+    console.error("WebSocket error:", err);
   });
 
   // Handle client disconnection
   ws.on("close", () => {
-    console.log("Client disconnected from /");
+    console.log("Client disconnected from websocket server");
   });
 });
 
@@ -137,9 +124,19 @@ wss2.on("connection", (ws, req) => {
     // loop to send data every 1 seconds
     setInterval(() => {
       const time = new Date();
+      const formattedTime = time
+        .toLocaleString("en-GB", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        })
+        .replace(",", "");
+
       const data = {
-        TimeStamp: time, // time stamp
-        Event: "random event",
         Data: {
           CO2: Math.floor(Math.random() * 100.0),
           VOC: Math.floor(Math.random() * 100.0),
@@ -148,14 +145,18 @@ wss2.on("connection", (ws, req) => {
           HUMID: Math.floor(Math.random() * 100.0),
           PRESSURE: Math.floor(Math.random() * 100.0),
         },
+        Event: "random event",
+        HardwareID: "EF-840",
+        Mode: "PREDICTION",
         Prediction: {
-          CO2: Math.floor(Math.random() * 100.0),
-          VOC: Math.floor(Math.random() * 100.0),
-          RA: Math.floor(Math.random() * 100.0),
-          TEMP: Math.floor(Math.random() * 100.0),
-          HUMID: Math.floor(Math.random() * 100.0),
-          PRESSURE: Math.floor(Math.random() * 100.0),
+          Cold: Math.floor(Math.random() * 100.0),
+          Dry: Math.floor(Math.random() * 100.0),
+          Hot: Math.floor(Math.random() * 100.0),
+          Normal: Math.floor(Math.random() * 100.0),
+          Warm: Math.floor(Math.random() * 100.0),
+          Wet: Math.floor(Math.random() * 100.0),
         },
+        TimeStamp: formattedTime, // time stamp
       };
       wss2.clients.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) {
@@ -247,7 +248,6 @@ app.post("/hardware", mode.checkmode);
 app.post("/command", mode.changeMode);
 app.get("/register", mode.registerDevice);
 app.get("/list", mode.listHardware);
-
 //TODO----------------------------------------------------------------------------------------
 
 // Server listening
