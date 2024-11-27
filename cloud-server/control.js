@@ -4,21 +4,16 @@ const { MongoClient, Timestamp } = require("mongodb");
 require("dotenv").config();
 const dbURI = process.env.MONGO_URI;
 
-const Function = require("./function.js");
+const Function = require("./function");
 
 // Connect to MongoDB
 const client = new MongoClient(dbURI);
 
 const checkmode = async (req, res) => {
   try {
-    // Log the entire request body { HardwareID: 'EF-001' }
-    //console.log('Received request body:', req.body);
-
     // Extract and convert fields to uppercase
     const { HardwareID } = req.body;
     const upperHardwareID = HardwareID.toUpperCase();
-
-    //console.log('Uppercased HardwareID:', upperHardwareID);
 
     // Connect to MongoDB
     await client.connect();
@@ -62,30 +57,6 @@ const checkmode = async (req, res) => {
             { HardwareID: upperHardwareID },
             { $set: { ...status, ...onlineTime } }
           );
-
-          //TODO auto delete the device after 5 seconds
-          // setTimeout(async () => {
-          //     const afterFiveSeconds = new Date();
-          //     const checkTimeFiveSec = afterFiveSeconds.toLocaleString('en-GB', {
-          //         year: 'numeric',
-          //         month: '2-digit',
-          //         day: '2-digit',
-          //         hour: '2-digit',
-          //         minute: '2-digit',
-          //         second: '2-digit',
-          //         hour12: false
-          //     }).replace(',', '');
-
-          //     const devicetime = await collection.findOne({ HardwareID: upperHardwareID });
-          //     console.log("new", checkTimeFiveSec, "device", devicetime.OnlineTimestamp);
-          //     if (devicetime) {
-          //         console.log("Device time", devicetime.OnlineTimestamp);
-          //         if (checkTimeFiveSec > devicetime.OnlineTimestamp) {
-          //             //await collection.deleteOne({ HardwareID: upperHardwareID });
-          //             console.log("Device deleted");
-          //         }
-          //     }
-          // }, 10000);
 
           // Add an activity log to the database
           const activityCollection = db.collection("activity_log");
